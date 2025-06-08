@@ -1,6 +1,6 @@
-import express from 'express'
-import axios from 'axios'
-import http from 'http'
+const express = require('express');
+const axios = require('axios');
+const http = require('http');
 
 const app = express();
 const port = 3000;
@@ -13,13 +13,8 @@ app.get('/', (_req, res) => {
 // Simulate button press
 app.get('/trigger', async (_req, res) => {
   try {
-    // Turn relay ON
     await axios.get('http://raspberrypi.local/relay/0?turn=on');
-
-    // Wait 500 ms
     await new Promise(resolve => setTimeout(resolve, 500));
-
-    // Turn relay OFF
     await axios.get('http://raspberrypi.local/relay/0?turn=off');
 
     res.send('Relay triggered (ON → OFF)');
@@ -34,4 +29,3 @@ const server = http.createServer(app);
 server.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
 });
-
