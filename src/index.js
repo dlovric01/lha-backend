@@ -1,6 +1,6 @@
-const express = require('express');
-const http = require('http');
-const axios = require('axios');
+import express from 'express'
+import axios from 'axios'
+import http from 'http'
 
 const app = express();
 const port = 3000;
