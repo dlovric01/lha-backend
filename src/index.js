@@ -1,42 +1,49 @@
+require('dotenv').config();
 const express = require('express');
-const axios = require('axios');
-const http = require('http');
-const os = require('os');
-
+const mqtt = require('mqtt');
 
 const app = express();
-const port = 3000;
+app.use(express.json());
 
-// Test route
-app.get('/', (_req, res) => {
-  res.send('Hello from Raspberry Pi');
+// MQTT connection
+const mqttClient = mqtt.connect(`mqtt://${process.env.MQTT_HOST}`, {
+  username: process.env.MQTT_USER,
+  password: process.env.MQTT_PASS,
+  port: parseInt(process.env.MQTT_PORT)
 });
 
-// Simulate button press
-app.get('/trigger', async (_req, res) => {
-  const shellyIp = '192.168.1.8';
+mqttClient.on('connect', () => {
+  console.log('✅ MQTT connected');
+});
 
-  try {
-    await axios.get(`http://${shellyIp}/relay/0?turn=on`);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    await axios.get(`http://${shellyIp}/relay/0?turn=off`);
+function publishRelayCommand(target) {
+  const topic = `lha/garage/${target}/rpc`;
+  const payload = JSON.stringify({
+    id: 1,
+    src: "nodejs-backend",
+    method: "Switch.Toggle",
+    params: { id: 0 }
+  });
 
-    res.send('Relay triggered (ON → OFF)');
-  } catch (error) {
-    console.error('Error triggering relay:', error.message);
-    res.status(500).send('Failed to trigger relay');
+  mqttClient.publish(topic, payload, (err) => {
+    if (err) console.error("MQTT publish error:", err);
+  });
+}
+
+// Endpoints
+app.post('/garage/:side', (req, res) => {
+  const { side } = req.params;
+
+  if (!['left', 'right'].includes(side)) {
+    return res.status(400).json({ error: 'Invalid garage side' });
   }
+
+  publishRelayCommand(side);
+  res.json({ status: 'ok', action: 'toggle', side });
 });
 
-const server = http.createServer(app);
-
-server.listen(port, () => {
-  const interfaces = os.networkInterfaces();
-  Object.values(interfaces).forEach(iface =>
-    iface.forEach(addr => {
-      if (addr.family === 'IPv4' && !addr.internal) {
-        console.log(`Server running at http://${addr.address}:${port}`);
-      }
-    })
-  );
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
