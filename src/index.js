@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const mqtt = require('mqtt');
+const os = require('os');
 
 const app = express();
 app.use(express.json());
@@ -30,6 +31,19 @@ function publishRelayCommand(target) {
   });
 }
 
+// Helper to get local IP address
+function getLocalIp() {
+  const interfaces = os.networkInterfaces();
+  for (const ifaceName of Object.keys(interfaces)) {
+    for (const iface of interfaces[ifaceName]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
+
 // Endpoints
 app.post('/garage/:side', (req, res) => {
   const { side } = req.params;
@@ -45,5 +59,6 @@ app.post('/garage/:side', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  const ip = getLocalIp();
+  console.log(`🚀 Server running on http://${ip}:${PORT}`);
 });
