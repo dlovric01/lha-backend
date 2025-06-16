@@ -3,11 +3,23 @@ const express = require('express');
 const mqtt = require('mqtt');
 const os = require('os');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// Global rate limiter: 20 requests per minute per IP
+const globalLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 20, // limit each IP to 20 requests per windowMs
+  message: { error: 'Too many requests from this IP, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use(globalLimiter);
 
 function authenticateJWT(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -80,7 +92,16 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
-app.post('/garage/:side', authenticateJWT, async (req, res) => {
+// Specific rate limiter for garage toggle endpoint (optional, adds stricter limit)
+const garageLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 10, // limit to 10 toggles per minute per IP
+  message: { error: 'Too many garage toggle requests, please wait a bit.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.post('/garage/:side', authenticateJWT, garageLimiter, async (req, res) => {
   const { side } = req.params;
 
   if (!['left', 'right'].includes(side)) {
