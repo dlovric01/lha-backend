@@ -7,15 +7,13 @@ const jwt = require('jsonwebtoken');
 const app = express();
 app.use(express.json());
 
-// JWT secret
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// JWT middleware
 function authenticateJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Missing Authorization header' });
 
-  const token = authHeader.split(' ')[1]; // Bearer <token>
+  const token = authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Missing token' });
 
   jwt.verify(token, JWT_SECRET, (err, decoded) => {
@@ -25,10 +23,8 @@ function authenticateJWT(req, res, next) {
   });
 }
 
-// MQTT connection
+// Connect to MQTT WITHOUT auth
 const mqttClient = mqtt.connect(`mqtt://${process.env.MQTT_HOST}`, {
-  username: process.env.MQTT_USER,
-  password: process.env.MQTT_PASS,
   port: parseInt(process.env.MQTT_PORT)
 });
 
@@ -44,7 +40,6 @@ mqttClient.on('close', () => {
   console.warn('⚠️ MQTT connection closed');
 });
 
-// MQTT command publisher with timeout
 function publishRelayCommand(target) {
   return new Promise((resolve, reject) => {
     const topic = `lha/garage/${target}/rpc`;
@@ -73,7 +68,6 @@ function publishRelayCommand(target) {
   });
 }
 
-// Helper to get local IP address
 function getLocalIp() {
   const interfaces = os.networkInterfaces();
   for (const ifaceName of Object.keys(interfaces)) {
@@ -86,7 +80,6 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
-// Secured endpoint
 app.post('/garage/:side', authenticateJWT, async (req, res) => {
   const { side } = req.params;
 
@@ -105,7 +98,6 @@ app.post('/garage/:side', authenticateJWT, async (req, res) => {
   }
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   const ip = getLocalIp();
