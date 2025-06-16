@@ -36,6 +36,15 @@ mqttClient.on('connect', () => {
   console.log('✅ MQTT connected');
 });
 
+mqttClient.on('error', (err) => {
+  console.error('❌ MQTT connection error:', err.message);
+});
+
+mqttClient.on('close', () => {
+  console.warn('⚠️ MQTT connection closed');
+});
+
+// MQTT command publisher with timeout
 function publishRelayCommand(target) {
   return new Promise((resolve, reject) => {
     const topic = `lha/garage/${target}/rpc`;
@@ -46,7 +55,13 @@ function publishRelayCommand(target) {
       params: { id: 0 }
     });
 
+    console.log(`📤 Publishing to topic: ${topic}`);
+    let timeout = setTimeout(() => {
+      reject(new Error("MQTT publish timed out"));
+    }, 3000);
+
     mqttClient.publish(topic, payload, (err) => {
+      clearTimeout(timeout);
       if (err) {
         console.error("❌ MQTT publish error:", err);
         reject(err);
@@ -57,7 +72,6 @@ function publishRelayCommand(target) {
     });
   });
 }
-
 
 // Helper to get local IP address
 function getLocalIp() {
@@ -81,14 +95,15 @@ app.post('/garage/:side', authenticateJWT, async (req, res) => {
   }
 
   try {
+    console.log(`🔁 Toggling garage door: ${side}`);
     await publishRelayCommand(side);
+    console.log(`✅ Toggle command complete`);
     res.json({ status: 'ok', action: 'toggle', side });
   } catch (err) {
-    console.error("❌ Failed to publish MQTT message:", err);
-    res.status(500).json({ error: 'MQTT publish failed' });
+    console.error("❌ Failed to publish MQTT message:", err.message);
+    res.status(500).json({ error: 'MQTT publish failed', message: err.message });
   }
 });
-
 
 // Start server
 const PORT = process.env.PORT || 3000;
