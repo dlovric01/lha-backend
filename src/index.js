@@ -2,28 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const mqtt = require('mqtt');
 const os = require('os');
-const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(express.json());
-
-// JWT secret
-const JWT_SECRET = process.env.JWT_SECRET;
-
-// JWT middleware
-function authenticateJWT(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Missing Authorization header' });
-
-  const token = authHeader.split(' ')[1]; // Bearer <token>
-  if (!token) return res.status(401).json({ error: 'Missing token' });
-
-  jwt.verify(token, JWT_SECRET, (err, decoded) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = decoded;
-    next();
-  });
-}
 
 // MQTT connection
 const mqttClient = mqtt.connect(`mqtt://${process.env.MQTT_HOST}`, {
@@ -63,8 +44,8 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
-// Secured endpoint
-app.post('/garage/:side', authenticateJWT, (req, res) => {
+// Endpoints
+app.post('/garage/:side', (req, res) => {
   const { side } = req.params;
 
   if (!['left', 'right'].includes(side)) {
