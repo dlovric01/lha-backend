@@ -37,18 +37,27 @@ mqttClient.on('connect', () => {
 });
 
 function publishRelayCommand(target) {
-  const topic = `lha/garage/${target}/rpc`;
-  const payload = JSON.stringify({
-    id: 1,
-    src: "nodejs-backend",
-    method: "Switch.Toggle",
-    params: { id: 0 }
-  });
+  return new Promise((resolve, reject) => {
+    const topic = `lha/garage/${target}/rpc`;
+    const payload = JSON.stringify({
+      id: 1,
+      src: "nodejs-backend",
+      method: "Switch.Toggle",
+      params: { id: 0 }
+    });
 
-  mqttClient.publish(topic, payload, (err) => {
-    if (err) console.error("MQTT publish error:", err);
+    mqttClient.publish(topic, payload, (err) => {
+      if (err) {
+        console.error("❌ MQTT publish error:", err);
+        reject(err);
+      } else {
+        console.log(`✅ MQTT message sent to ${topic}`);
+        resolve();
+      }
+    });
   });
 }
+
 
 // Helper to get local IP address
 function getLocalIp() {
@@ -64,16 +73,22 @@ function getLocalIp() {
 }
 
 // Secured endpoint
-app.post('/garage/:side', authenticateJWT, (req, res) => {
+app.post('/garage/:side', authenticateJWT, async (req, res) => {
   const { side } = req.params;
 
   if (!['left', 'right'].includes(side)) {
     return res.status(400).json({ error: 'Invalid garage side' });
   }
 
-  publishRelayCommand(side);
-  res.json({ status: 'ok', action: 'toggle', side });
+  try {
+    await publishRelayCommand(side);
+    res.json({ status: 'ok', action: 'toggle', side });
+  } catch (err) {
+    console.error("❌ Failed to publish MQTT message:", err);
+    res.status(500).json({ error: 'MQTT publish failed' });
+  }
 });
+
 
 // Start server
 const PORT = process.env.PORT || 3000;
