@@ -9,18 +9,20 @@ const app = express();
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const MQTT_HOST = process.env.MQTT_HOST;
+const MQTT_PORT = parseInt(process.env.MQTT_PORT);
+const PORT = process.env.PORT || 3000;
 
-// Global rate limiter: 20 requests per minute per IP
-const globalLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 20, // limit each IP to 20 requests per windowMs
+// === Global Rate Limiter ===
+app.use(rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20,
   message: { error: 'Too many requests from this IP, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-});
+}));
 
-app.use(globalLimiter);
-
+// === JWT Auth Middleware ===
 function authenticateJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Missing Authorization header' });
@@ -35,55 +37,55 @@ function authenticateJWT(req, res, next) {
   });
 }
 
-// Connect to MQTT WITHOUT auth
-const mqttClient = mqtt.connect(`mqtt://${process.env.MQTT_HOST}`, {
-  port: parseInt(process.env.MQTT_PORT)
-});
+// === MQTT Setup ===
+const mqttClient = mqtt.connect(`mqtt://${MQTT_HOST}`, { port: MQTT_PORT });
 
 mqttClient.on('connect', () => {
   console.log('✅ MQTT connected');
 });
 
 mqttClient.on('error', (err) => {
-  console.error('❌ MQTT connection error:', err.message);
+  console.error('❌ MQTT error:', err.message);
 });
 
 mqttClient.on('close', () => {
   console.warn('⚠️ MQTT connection closed');
 });
 
+// === MQTT Command Publisher ===
 function publishRelayCommand(target) {
-  return new Promise((resolve, reject) => {
-    const topic = `lha/garage/${target}/rpc`;
-    const payload = JSON.stringify({
-      id: 1,
-      src: "nodejs-backend",
-      method: "Switch.Toggle",
-      params: { id: 0 }
-    });
+  const topic = `lha/garage/${target}/rpc`;
+  const payload = JSON.stringify({
+    id: 1,
+    src: 'nodejs-backend',
+    method: 'Switch.Toggle',
+    params: { id: 0 },
+  });
 
-    console.log(`📤 Publishing to topic: ${topic}`);
-    let timeout = setTimeout(() => {
-      reject(new Error("MQTT publish timed out"));
+  console.log(`📤 Publishing to topic: ${topic}`);
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('MQTT publish timed out'));
     }, 3000);
 
     mqttClient.publish(topic, payload, (err) => {
       clearTimeout(timeout);
       if (err) {
-        console.error("❌ MQTT publish error:", err);
-        reject(err);
-      } else {
-        console.log(`✅ MQTT message sent to ${topic}`);
-        resolve();
+        console.error('❌ MQTT publish error:', err);
+        return reject(err);
       }
+      console.log(`✅ MQTT message sent to ${topic}`);
+      resolve();
     });
   });
 }
 
+// === Local IP Utility ===
 function getLocalIp() {
   const interfaces = os.networkInterfaces();
-  for (const ifaceName of Object.keys(interfaces)) {
-    for (const iface of interfaces[ifaceName]) {
+  for (const ifaceList of Object.values(interfaces)) {
+    for (const iface of ifaceList) {
       if (iface.family === 'IPv4' && !iface.internal) {
         return iface.address;
       }
@@ -92,15 +94,16 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
-// Specific rate limiter for garage toggle endpoint (optional, adds stricter limit)
+// === Per-Route Rate Limiter ===
 const garageLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 10, // limit to 10 toggles per minute per IP
+  windowMs: 60 * 1000,
+  max: 10,
   message: { error: 'Too many garage toggle requests, please wait a bit.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
+// === Garage Toggle Route ===
 app.post('/garage/:side', authenticateJWT, garageLimiter, async (req, res) => {
   const { side } = req.params;
 
@@ -111,16 +114,16 @@ app.post('/garage/:side', authenticateJWT, garageLimiter, async (req, res) => {
   try {
     console.log(`🔁 Toggling garage door: ${side}`);
     await publishRelayCommand(side);
-    console.log(`✅ Toggle command complete`);
+    console.log('✅ Toggle command complete');
     res.json({ status: 'ok', action: 'toggle', side });
   } catch (err) {
-    console.error("❌ Failed to publish MQTT message:", err.message);
+    console.error('❌ MQTT publish failed:', err.message);
     res.status(500).json({ error: 'MQTT publish failed', message: err.message });
   }
 });
 
-const PORT = process.env.PORT || 3000;
+// === Start Server ===
 app.listen(PORT, () => {
   const ip = getLocalIp();
-  console.log(`🚀 Server running on http://${ip}:${PORT}`);
+  console.log(`🚀 Server running at http://${ip}:${PORT}`);
 });
