@@ -8,7 +8,6 @@ A minimal Node.js backend for controlling a sliding gate and two garage doors us
 - **MQTT communication**: Sends toggle commands to Shelly 1 Gen4 devices
 - **JWT authentication**: Secures API endpoints with token-based auth
 - **Rate limiting**: Prevents spam requests (20 global/10 garage per minute)
-- **Mobile app ready**: Designed to work with Flutter mobile interface
 
 ## 🏠 Hardware Setup
 
@@ -19,7 +18,7 @@ A minimal Node.js backend for controlling a sliding gate and two garage doors us
 
 ## 📡 How it works
 
-1. **Flutter app** sends HTTP requests to the backend
+1. **Flutter app** sends HTTPS requests to the backend
 2. **Backend** validates JWT token and rate limits
 3. **MQTT message** sent to appropriate Shelly device
 4. **Shelly relay** toggles to open/close door or gate
