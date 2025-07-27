@@ -72,7 +72,7 @@ async function toggleShellyRelay(target) {
   const url = `${baseUrl}/rpc/Switch.Toggle`;
   console.log(`📤 Slanje HTTP POST na: ${url}`);
 
-  const response = await axios.post(url, { id: 0 }, { timeout: 3000 });
+  const response = await axios.post(url, { id: 0 }, { timeout: 10000 });
   console.log(`✅ Odgovor od Shelly:`, response.data);
   return response.data;
 }
@@ -86,7 +86,8 @@ async function handleToggle(req, res, target) {
     res.json({ status: 'ok', akcija: 'toggle', cilj: target });
   } catch (err) {
     console.error(`❌ Greška (${target}):`, err.message);
-    res.status(500).json({ error: 'Slanje HTTP zahtjeva nije uspjelo', message: err.message });
+    // GENERIČKA PORUKA ZA KORISNIKA, nikakvi tehnički detalji ne izlaze
+    res.status(500).json({ error: 'Nešto je pošlo po krivu, pokušajte ponovo ili opet kasnije.' });
   }
 }
 
