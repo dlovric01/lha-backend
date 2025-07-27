@@ -11,14 +11,14 @@ app.use(express.json());
 const JWT_SECRET = process.env.JWT_SECRET;
 const PORT = process.env.PORT || 3000;
 
-// === Shelly Device IP Map ===
+// Shelly devices IPs on your LAN
 const shellyDevices = {
-  left: 'http://192.168.1.201',
-  right: 'http://192.168.1.202',
-  gate: 'http://192.168.1.203',
+  left: 'http://192.168.1.202',   // update IP accordingly
+  right: 'http://192.168.1.201',  // update IP accordingly
+  gate: 'http://192.168.1.203',   // update IP accordingly
 };
 
-// === Global Rate Limiter ===
+// Global rate limiter (20 req/min per IP)
 app.use(rateLimit({
   windowMs: 60 * 1000,
   max: 20,
@@ -27,7 +27,7 @@ app.use(rateLimit({
   legacyHeaders: false,
 }));
 
-// === JWT Auth Middleware ===
+// JWT auth middleware
 function authenticateJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Nedostaje Authorization zaglavlje' });
@@ -42,7 +42,7 @@ function authenticateJWT(req, res, next) {
   });
 }
 
-// === Utility: Get Local IP ===
+// Utility: get local IP of backend server
 function getLocalIp() {
   const interfaces = os.networkInterfaces();
   for (const ifaceList of Object.values(interfaces)) {
@@ -55,7 +55,7 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
-// === Per-Route Rate Limiter ===
+// Per-route rate limiter for toggling (10 req/min)
 const toggleLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
@@ -64,7 +64,7 @@ const toggleLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// === Shelly Relay Command ===
+// Send HTTP POST to Shelly device to toggle relay
 async function toggleShellyRelay(target) {
   const baseUrl = shellyDevices[target];
   if (!baseUrl) throw new Error(`Nepoznat cilj: ${target}`);
@@ -73,11 +73,11 @@ async function toggleShellyRelay(target) {
   console.log(`📤 Slanje HTTP POST na: ${url}`);
 
   const response = await axios.post(url, { id: 0 }, { timeout: 3000 });
-  console.log(`✅ Odgovor:`, response.data);
+  console.log(`✅ Odgovor od Shelly:`, response.data);
   return response.data;
 }
 
-// === Shared Toggle Handler ===
+// Shared toggle handler
 async function handleToggle(req, res, target) {
   try {
     console.log(`🔁 Aktivacija (HTTP): ${target}`);
@@ -90,7 +90,9 @@ async function handleToggle(req, res, target) {
   }
 }
 
-// === Routes ===
+// Routes
+
+// Toggle garage door left or right
 app.post('/garage/:side', authenticateJWT, toggleLimiter, (req, res) => {
   const { side } = req.params;
   if (!['left', 'right'].includes(side)) {
@@ -99,11 +101,12 @@ app.post('/garage/:side', authenticateJWT, toggleLimiter, (req, res) => {
   handleToggle(req, res, side);
 });
 
+// Toggle gate
 app.post('/gate', authenticateJWT, toggleLimiter, (req, res) => {
   handleToggle(req, res, 'gate');
 });
 
-// === Start Server ===
+// Start server
 app.listen(PORT, () => {
   const ip = getLocalIp();
   console.log(`🚀 Server pokrenut na http://${ip}:${PORT}`);
