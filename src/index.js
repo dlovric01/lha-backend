@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const axios = require('axios');
+const mqtt = require('mqtt');
 const os = require('os');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
@@ -9,25 +9,27 @@ const app = express();
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const MQTT_HOST = process.env.MQTT_HOST;
+const MQTT_PORT = parseInt(process.env.MQTT_PORT, 10);
 const PORT = process.env.PORT || 3000;
 
-// Shelly devices IPs on your LAN
-const shellyDevices = {
-  left: 'http://192.168.1.202',   // update IP accordingly
-  right: 'http://192.168.1.201',  // update IP accordingly
-  gate: 'http://192.168.1.203',   // update IP accordingly
+// === MQTT Topic Map ===
+const topicMap = {
+  left: 'lha/garage/left/rpc',
+  right: 'lha/garage/right/rpc',
+  gate: 'lha/gate/rpc',
 };
 
-// Global rate limiter (20 req/min per IP)
+// === Global Rate Limiter ===
 app.use(rateLimit({
-  windowMs: 60 * 1000,
+  windowMs: 60 * 1000, // 1 minute
   max: 20,
   message: { error: 'Previše zahtjeva s ove IP adrese, pokušajte kasnije.' },
   standardHeaders: true,
   legacyHeaders: false,
 }));
 
-// JWT auth middleware
+// === JWT Auth Middleware ===
 function authenticateJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Nedostaje Authorization zaglavlje' });
@@ -42,7 +44,55 @@ function authenticateJWT(req, res, next) {
   });
 }
 
-// Utility: get local IP of backend server
+// === MQTT Setup ===
+const mqttClient = mqtt.connect(`mqtt://${MQTT_HOST}`, { port: MQTT_PORT });
+
+mqttClient.on('connect', () => {
+  console.log('✅ MQTT povezan');
+});
+
+mqttClient.on('error', (err) => {
+  console.error('❌ MQTT greška:', err.message);
+});
+
+mqttClient.on('close', () => {
+  console.warn('⚠️ MQTT veza zatvorena');
+});
+
+// === MQTT Command Publisher ===
+function publishRelayCommand(target) {
+  const topic = topicMap[target];
+  if (!topic) {
+    return Promise.reject(new Error(`Nepoznat MQTT cilj: ${target}`));
+  }
+
+  const payload = JSON.stringify({
+    id: 1,
+    src: 'nodejs-backend',
+    method: 'Switch.Toggle',
+    params: { id: 0 },
+  });
+
+  console.log(`📤 Slanje MQTT poruke na temu: ${topic}`);
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('MQTT objava je istekla'));
+    }, 3000);
+
+    mqttClient.publish(topic, payload, (err) => {
+      clearTimeout(timeout);
+      if (err) {
+        console.error('❌ MQTT objava nije uspjela:', err);
+        return reject(err);
+      }
+      console.log(`✅ MQTT poruka poslana na ${topic}`);
+      resolve();
+    });
+  });
+}
+
+// === Utility: Get Local IP ===
 function getLocalIp() {
   const interfaces = os.networkInterfaces();
   for (const ifaceList of Object.values(interfaces)) {
@@ -55,7 +105,7 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
-// Per-route rate limiter for toggling (10 req/min)
+// === Per-Route Rate Limiter ===
 const toggleLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
@@ -64,36 +114,22 @@ const toggleLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Send HTTP POST to Shelly device to toggle relay
-async function toggleShellyRelay(target) {
-  const baseUrl = shellyDevices[target];
-  if (!baseUrl) throw new Error(`Nepoznat cilj: ${target}`);
-
-  const url = `${baseUrl}/rpc/Switch.Toggle`;
-  console.log(`📤 Slanje HTTP POST na: ${url}`);
-
-  const response = await axios.post(url, { id: 0 }, { timeout: 10000 });
-  console.log(`✅ Odgovor od Shelly:`, response.data);
-  return response.data;
-}
-
-// Shared toggle handler
+// === Shared Toggle Handler ===
 async function handleToggle(req, res, target) {
   try {
-    console.log(`🔁 Aktivacija (HTTP): ${target}`);
-    await toggleShellyRelay(target);
-    console.log('✅ HTTP naredba uspješno poslana');
+    console.log(`🔁 Aktivacija: ${target}`);
+    await publishRelayCommand(target);
+    console.log('✅ Naredba za aktivaciju poslana');
     res.json({ status: 'ok', akcija: 'toggle', cilj: target });
   } catch (err) {
-    console.error(`❌ Greška (${target}):`, err.message);
-    // GENERIČKA PORUKA ZA KORISNIKA, nikakvi tehnički detalji ne izlaze
-    res.status(500).json({ error: 'Nešto je pošlo po krivu, pokušajte ponovo ili opet kasnije.' });
+    console.error(`❌ Greška pri slanju MQTT naredbe (${target}):`, err.message);
+    res.status(500).json({ error: 'Slanje MQTT poruke nije uspjelo', message: err.message });
   }
 }
 
-// Routes
+// === Routes ===
 
-// Toggle garage door left or right
+// Garage toggle
 app.post('/garage/:side', authenticateJWT, toggleLimiter, (req, res) => {
   const { side } = req.params;
   if (!['left', 'right'].includes(side)) {
@@ -102,12 +138,12 @@ app.post('/garage/:side', authenticateJWT, toggleLimiter, (req, res) => {
   handleToggle(req, res, side);
 });
 
-// Toggle gate
+// Gate toggle
 app.post('/gate', authenticateJWT, toggleLimiter, (req, res) => {
   handleToggle(req, res, 'gate');
 });
 
-// Start server
+// === Start Server ===
 app.listen(PORT, () => {
   const ip = getLocalIp();
   console.log(`🚀 Server pokrenut na http://${ip}:${PORT}`);
