@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const mqtt = require('mqtt');
+const axios = require('axios');
 const os = require('os');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
@@ -9,20 +9,18 @@ const app = express();
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET;
-const MQTT_HOST = process.env.MQTT_HOST;
-const MQTT_PORT = parseInt(process.env.MQTT_PORT, 10);
 const PORT = process.env.PORT || 3000;
 
-// === MQTT Topic Map ===
-const topicMap = {
-  left: 'lha/garage/left/rpc',
-  right: 'lha/garage/right/rpc',
-  gate: 'lha/gate/rpc',
+// === Shelly Device IP Map ===
+const shellyDevices = {
+  left: 'http://192.168.1.201',
+  right: 'http://192.168.1.202',
+  gate: 'http://192.168.1.203',
 };
 
 // === Global Rate Limiter ===
 app.use(rateLimit({
-  windowMs: 60 * 1000, // 1 minute
+  windowMs: 60 * 1000,
   max: 20,
   message: { error: 'Previše zahtjeva s ove IP adrese, pokušajte kasnije.' },
   standardHeaders: true,
@@ -41,54 +39,6 @@ function authenticateJWT(req, res, next) {
     if (err) return res.status(403).json({ error: 'Nevažeći token' });
     req.user = decoded;
     next();
-  });
-}
-
-// === MQTT Setup ===
-const mqttClient = mqtt.connect(`mqtt://${MQTT_HOST}`, { port: MQTT_PORT });
-
-mqttClient.on('connect', () => {
-  console.log('✅ MQTT povezan');
-});
-
-mqttClient.on('error', (err) => {
-  console.error('❌ MQTT greška:', err.message);
-});
-
-mqttClient.on('close', () => {
-  console.warn('⚠️ MQTT veza zatvorena');
-});
-
-// === MQTT Command Publisher ===
-function publishRelayCommand(target) {
-  const topic = topicMap[target];
-  if (!topic) {
-    return Promise.reject(new Error(`Nepoznat MQTT cilj: ${target}`));
-  }
-
-  const payload = JSON.stringify({
-    id: 1,
-    src: 'nodejs-backend',
-    method: 'Switch.Toggle',
-    params: { id: 0 },
-  });
-
-  console.log(`📤 Slanje MQTT poruke na temu: ${topic}`);
-
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('MQTT objava je istekla'));
-    }, 3000);
-
-    mqttClient.publish(topic, payload, (err) => {
-      clearTimeout(timeout);
-      if (err) {
-        console.error('❌ MQTT objava nije uspjela:', err);
-        return reject(err);
-      }
-      console.log(`✅ MQTT poruka poslana na ${topic}`);
-      resolve();
-    });
   });
 }
 
@@ -114,22 +64,33 @@ const toggleLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// === Shelly Relay Command ===
+async function toggleShellyRelay(target) {
+  const baseUrl = shellyDevices[target];
+  if (!baseUrl) throw new Error(`Nepoznat cilj: ${target}`);
+
+  const url = `${baseUrl}/rpc/Switch.Toggle`;
+  console.log(`📤 Slanje HTTP POST na: ${url}`);
+
+  const response = await axios.post(url, { id: 0 }, { timeout: 3000 });
+  console.log(`✅ Odgovor:`, response.data);
+  return response.data;
+}
+
 // === Shared Toggle Handler ===
 async function handleToggle(req, res, target) {
   try {
-    console.log(`🔁 Aktivacija: ${target}`);
-    await publishRelayCommand(target);
-    console.log('✅ Naredba za aktivaciju poslana');
+    console.log(`🔁 Aktivacija (HTTP): ${target}`);
+    await toggleShellyRelay(target);
+    console.log('✅ HTTP naredba uspješno poslana');
     res.json({ status: 'ok', akcija: 'toggle', cilj: target });
   } catch (err) {
-    console.error(`❌ Greška pri slanju MQTT naredbe (${target}):`, err.message);
-    res.status(500).json({ error: 'Slanje MQTT poruke nije uspjelo', message: err.message });
+    console.error(`❌ Greška (${target}):`, err.message);
+    res.status(500).json({ error: 'Slanje HTTP zahtjeva nije uspjelo', message: err.message });
   }
 }
 
 // === Routes ===
-
-// Garage toggle
 app.post('/garage/:side', authenticateJWT, toggleLimiter, (req, res) => {
   const { side } = req.params;
   if (!['left', 'right'].includes(side)) {
@@ -138,7 +99,6 @@ app.post('/garage/:side', authenticateJWT, toggleLimiter, (req, res) => {
   handleToggle(req, res, side);
 });
 
-// Gate toggle
 app.post('/gate', authenticateJWT, toggleLimiter, (req, res) => {
   handleToggle(req, res, 'gate');
 });
